@@ -1,0 +1,89 @@
+# ============================================
+# AMIE Platform v2.0 - Premium Dark Edition
+# .gitignore
+# ============================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+PIPFILE.lock
+
+# Virtual Environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Streamlit
+.streamlit/secrets.toml
+.streamlit/config.toml
+
+# Data files (don't commit large datasets)
+*.csv
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+data/raw/
+data/processed/
+
+# Model files (if large)
+models/*.pkl
+models/*.h5
+*.pth
+*.pt
+
+# Logs
+*.log
+logs/
+
+# Environment variables
+.env
+.env.local
+
+# API Keys (IMPORTANT!)
+secrets.py
+config/secrets.json
+*_secrets.py
+
+# Cache
+.cache/
+*.cache
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Temporary files
+*.tmp
+*.temp
