@@ -98,7 +98,8 @@ class AlphaFactors:
         f['bollinger'] = AlphaFactors.bollinger(p, 20)
         return f.dropna()
 
-# Advanced Backtester with TCA
+# FIXED AdvancedBacktester - Replace in your code at line ~80
+
 class AdvancedBacktester:
     def __init__(self, capital=100000, commission=0.001, slippage=0.0005):
         self.capital = capital
@@ -112,10 +113,21 @@ class AdvancedBacktester:
         eq = []
         self.trades = []
         
-        for date in prices.index:
-            p = safe_float(prices[date], 100)
-            sig = int(signals[date]) if date in signals.index else 0
+        # FIXED: Use iloc for reliable indexing
+        for i in range(len(prices)):
+            try:
+                date = prices.index[i]
+                p = safe_float(prices.iloc[i], 100)
+            except:
+                continue
             
+            # Get signal safely
+            try:
+                sig = int(signals.loc[date]) if date in signals.index else 0
+            except:
+                sig = 0
+            
+            # Buy logic
             if sig == 1 and cash > 0:
                 shares = int(cash * 0.95 / p)
                 entry_price = p * (1 + self.slippage)
@@ -129,6 +141,7 @@ class AdvancedBacktester:
                         'slippage': shares * p * self.slippage
                     })
             
+            # Sell logic
             elif sig == -1 and shares > 0:
                 exit_price = p * (1 - self.slippage)
                 proceeds = shares * exit_price * (1 - self.commission)
@@ -138,7 +151,7 @@ class AdvancedBacktester:
                 if len(self.trades) > 0 and self.trades[-1]['action'] == 'BUY':
                     entry = self.trades[-1]['price']
                     pnl = (exit_price - entry) * shares
-                    pnl_pct = (exit_price - entry) / entry
+                    pnl_pct = (exit_price - entry) / entry if entry != 0 else 0
                 
                 cash += proceeds
                 self.trades.append({
@@ -149,6 +162,7 @@ class AdvancedBacktester:
                 })
                 shares = 0
             
+            # Record equity
             val = cash + shares * p
             eq.append({'date': date, 'value': val, 'returns': (val - self.capital) / self.capital})
         
@@ -156,6 +170,15 @@ class AdvancedBacktester:
     
     def compute_metrics(self, equity_df):
         """Comprehensive performance metrics"""
+        if len(equity_df) == 0:
+            return {
+                'total_return': 0, 'sharpe': 0, 'sortino': 0,
+                'max_drawdown': 0, 'calmar': 0, 'win_rate': 0,
+                'avg_win': 0, 'avg_loss': 0, 'profit_factor': 0,
+                'total_commission': 0, 'total_slippage': 0,
+                'num_trades': 0, 'skewness': 0, 'kurtosis': 0, 'final': self.capital
+            }
+        
         equity_df['daily_ret'] = equity_df['value'].pct_change()
         
         total_ret = (equity_df['value'].iloc[-1] - self.capital) / self.capital
@@ -179,7 +202,8 @@ class AdvancedBacktester:
             sell_trades = trades_df[trades_df['action'] == 'SELL']
             win_rate = len(winning_trades) / len(sell_trades) if len(sell_trades) > 0 else 0
             avg_win = winning_trades['pnl'].mean() if len(winning_trades) > 0 else 0
-            avg_loss = trades_df[trades_df['pnl'] < 0]['pnl'].mean() if len(trades_df[trades_df['pnl'] < 0]) > 0 else 0
+            losing_trades = trades_df[trades_df['pnl'] < 0]
+            avg_loss = losing_trades['pnl'].mean() if len(losing_trades) > 0 else 0
             profit_factor = abs(avg_win / avg_loss) if avg_loss != 0 else 0
         else:
             win_rate = avg_win = avg_loss = profit_factor = 0
@@ -187,8 +211,9 @@ class AdvancedBacktester:
         total_commission = trades_df['commission'].sum() if len(trades_df) > 0 else 0
         total_slippage = trades_df['slippage'].sum() if len(trades_df) > 0 else 0
         
-        ret_skew = skew(equity_df['daily_ret'].dropna()) if len(equity_df['daily_ret'].dropna()) > 3 else 0
-        ret_kurt = kurtosis(equity_df['daily_ret'].dropna()) if len(equity_df['daily_ret'].dropna()) > 3 else 0
+        ret_vals = equity_df['daily_ret'].dropna()
+        ret_skew = skew(ret_vals) if len(ret_vals) > 3 else 0
+        ret_kurt = kurtosis(ret_vals) if len(ret_vals) > 3 else 0
         
         return {
             'total_return': total_ret, 'sharpe': sharpe, 'sortino': sortino,
@@ -198,6 +223,7 @@ class AdvancedBacktester:
             'num_trades': len(trades_df[trades_df['action'] == 'SELL']) if len(trades_df) > 0 else 0,
             'skewness': ret_skew, 'kurtosis': ret_kurt, 'final': equity_df['value'].iloc[-1]
         }
+
 
 # Header
 st.markdown('<h1 class="main-header">🌙 AMIE PLATFORM PRO</h1>', unsafe_allow_html=True)
