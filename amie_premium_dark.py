@@ -185,15 +185,16 @@ with tab1:
     
     col1, col2, col3, col4 = st.columns(4)
     
-    current_price = prices.iloc[-1]
-    price_change = prices.pct_change().iloc[-1]
-    volatility = prices.pct_change().std() * np.sqrt(252)
-    current_rsi = factors['rsi_14'].iloc[-1]
-    
-    col1.metric("Current Price", f"${current_price:.2f}", f"{price_change:.2%}")
-    col2.metric("30-Day Return", f"{prices.pct_change(30).iloc[-1]:.2%}")
-    col3.metric("Volatility (Annual)", f"{volatility:.1%}")
-    col4.metric("RSI (14)", f"{current_rsi:.1f}")
+current_price = prices.iloc[-1]
+price_change = prices.pct_change().iloc[-1]
+price_change = 0 if pd.isna(price_change) else price_change
+volatility = prices.pct_change().std() * np.sqrt(252)
+current_rsi = factors['rsi_14'].iloc[-1] if len(factors) > 0 else 50
+
+col1.metric("Current Price", f"${current_price:.2f}", f"{price_change:.2%}")
+col2.metric("30-Day Return", f"{prices.pct_change(30).iloc[-1]:.2%}" if len(prices) > 30 and not pd.isna(prices.pct_change(30).iloc[-1]) else "N/A")
+col3.metric("Volatility (Annual)", f"{volatility:.1%}")
+col4.metric("RSI (14)", f"{current_rsi:.1f}")
     
     # ACTIONABLE INSIGHTS
     st.markdown("### 🎯 Current Market Signal")
