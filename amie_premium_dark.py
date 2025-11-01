@@ -1,6 +1,6 @@
 """
-AMIE Platform v2.0 - ULTRA SAFE VERSION
-All pandas errors handled with try/except
+AMIE Platform v2.0 - Chart Fixed Version
+Beautiful charts for real and simulated data
 """
 
 import streamlit as st
@@ -51,6 +51,14 @@ def safe_float(value, default=0.0):
         return default if np.isnan(val) or np.isinf(val) else val
     except:
         return default
+
+def clean_series_for_plot(series):
+    """Clean pandas series for Plotly - remove timezone, NaN, and ensure proper format"""
+    clean = series.copy().dropna()
+    # Remove timezone if present
+    if hasattr(clean.index, 'tz') and clean.index.tz is not None:
+        clean.index = clean.index.tz_localize(None)
+    return clean
 
 class AlphaFactors:
     @staticmethod
@@ -128,7 +136,7 @@ with st.sidebar:
     
     if source == "📊 Real Stock Data" and REAL_DATA:
         ticker = st.text_input("Ticker:", "SPY")
-        period = st.selectbox("Period:", ["1mo", "3mo", "6mo", "1y", "2y"], index=3)
+        period = st.selectbox("Period:", ["1mo", "3mo", "6mo", "1y", "2y", "5y"], index=3)
         use_real = True
     else:
         if source == "📊 Real Stock Data":
@@ -151,7 +159,13 @@ with st.sidebar:
 def load_real(t, p):
     try:
         data = yf.download(t, period=p, progress=False)
-        return data['Close']
+        if len(data) > 0:
+            prices = data['Close']
+            # Clean timezone info
+            if hasattr(prices.index, 'tz') and prices.index.tz is not None:
+                prices.index = prices.index.tz_localize(None)
+            return prices
+        return None
     except:
         return None
 
@@ -159,10 +173,10 @@ if use_real and REAL_DATA:
     with st.spinner(f"Loading {ticker}..."):
         prices = load_real(ticker, period)
         if prices is None or len(prices) == 0:
-            st.error("Failed. Using simulated.")
+            st.error("Failed to load. Using simulated data.")
             use_real = False
         else:
-            st.success(f"✅ {len(prices)} days loaded")
+            st.success(f"✅ Loaded {len(prices)} days of {ticker}")
 
 if not use_real:
     np.random.seed(42)
@@ -178,7 +192,6 @@ with tab1:
     
     col1, col2, col3, col4 = st.columns(4)
     
-    # ULTRA SAFE metric calculations
     cp = safe_float(prices.iloc[-1], 100)
     pc = safe_float(prices.pct_change().iloc[-1], 0)
     vol = safe_float(prices.pct_change().std() * np.sqrt(252), 0)
@@ -192,124 +205,262 @@ with tab1:
     col3.metric("Volatility", f"{vol:.1%}")
     col4.metric("RSI", f"{rsi:.1f}")
     
-    st.markdown("### 🎯 Signal")
+    st.markdown("### 🎯 Current Signal")
     
     if rsi > 70:
         st.markdown(f"""<div class="insight-box"><strong>⚠️ OVERBOUGHT</strong><br>
-        RSI at {rsi:.1f}. Consider profit-taking.</div>""", unsafe_allow_html=True)
+        RSI at {rsi:.1f}. Consider profit-taking or waiting for pullback.</div>""", unsafe_allow_html=True)
     elif rsi < 30:
         st.markdown(f"""<div class="recommendation"><strong>✅ OVERSOLD</strong><br>
-        RSI at {rsi:.1f}. Potential buy opportunity.</div>""", unsafe_allow_html=True)
+        RSI at {rsi:.1f}. Potential buying opportunity.</div>""", unsafe_allow_html=True)
     else:
-        st.info(f"ℹ️ **NEUTRAL**: RSI at {rsi:.1f}")
+        st.info(f"ℹ️ **NEUTRAL**: RSI at {rsi:.1f} is in normal range")
     
     st.markdown("---")
-    st.markdown("### 📈 Price Chart")
+    st.markdown("### 📈 Price Chart with Moving Averages")
+    
+    # Clean data for plotting
+    plot_prices = clean_series_for_plot(prices)
+    ma20 = plot_prices.rolling(20).mean().dropna()
+    ma50 = plot_prices.rolling(50).mean().dropna()
     
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=prices.index, y=prices.values, name='Price', 
-                            line=dict(color='#7c3aed', width=2)))
-    fig.add_trace(go.Scatter(x=prices.index, y=prices.rolling(20).mean().values, name='20-MA', 
-                            line=dict(color='#06b6d4', width=1, dash='dash')))
-    fig.update_layout(**PLOT, height=450, hovermode='x unified')
+    
+    # Price line
+    fig.add_trace(go.Scatter(
+        x=plot_prices.index, 
+        y=plot_prices.values, 
+        name='Price', 
+        line=dict(color='#7c3aed', width=2.5),
+        mode='lines'
+    ))
+    
+    # 20-day MA
+    if len(ma20) > 0:
+        fig.add_trace(go.Scatter(
+            x=ma20.index, 
+            y=ma20.values, 
+            name='20-Day MA', 
+            line=dict(color='#06b6d4', width=1.5, dash='dash'),
+            mode='lines'
+        ))
+    
+    # 50-day MA
+    if len(ma50) > 0:
+        fig.add_trace(go.Scatter(
+            x=ma50.index, 
+            y=ma50.values, 
+            name='50-Day MA', 
+            line=dict(color='#ec4899', width=1.5, dash='dot'),
+            mode='lines'
+        ))
+    
+    fig.update_layout(
+        **PLOT, 
+        height=500, 
+        hovermode='x unified',
+        xaxis_title="Date",
+        yaxis_title="Price ($)",
+        showlegend=True,
+        legend=dict(
+            x=0.01, 
+            y=0.99, 
+            bgcolor='rgba(26,31,58,0.8)',
+            bordercolor='#7c3aed',
+            borderwidth=1
+        ),
+        margin=dict(l=50, r=50, t=50, b=50)
+    )
+    
+    # Format axis
+    fig.update_xaxes(showgrid=True, gridwidth=0.5)
+    fig.update_yaxes(showgrid=True, gridwidth=0.5, tickformat='$,.2f')
+    
     st.plotly_chart(fig, use_container_width=True)
     
-    csv = prices.to_csv().encode()
-    st.download_button("📥 Download Data", csv, "prices.csv")
+    col1, col2 = st.columns(2)
+    with col1:
+        csv = prices.to_csv().encode()
+        st.download_button("📥 Download Price Data", csv, "prices.csv", use_container_width=True)
+    with col2:
+        st.markdown(f"**Data Points:** {len(prices)} | **Date Range:** {plot_prices.index[0].date()} to {plot_prices.index[-1].date()}")
 
 with tab2:
     st.markdown("## Factor Analysis")
     
     if len(factors) == 0:
-        st.warning("Need at least 60 days for factors")
+        st.warning("Need at least 60 days of data to compute factors")
     else:
-        sel = st.selectbox("Factor:", factors.columns.tolist())
+        sel = st.selectbox("Select Factor:", factors.columns.tolist())
         
         col1, col2 = st.columns([2, 1])
         
         with col1:
-            fig = make_subplots(rows=2, cols=1, subplot_titles=('Price', sel))
-            fig.add_trace(go.Scatter(x=prices.index, y=prices.values, name='Price'), row=1, col=1)
-            fig.add_trace(go.Scatter(x=factors.index, y=factors[sel].values, name=sel), row=2, col=1)
-            fig.update_layout(**PLOT, height=600)
+            # Clean data for plotting
+            plot_prices_clean = clean_series_for_plot(prices)
+            plot_factors_clean = clean_series_for_plot(factors[sel])
+            
+            fig = make_subplots(
+                rows=2, cols=1, 
+                subplot_titles=('Price Movement', f'Factor: {sel.replace("_", " ").title()}'),
+                vertical_spacing=0.15,
+                row_heights=[0.5, 0.5]
+            )
+            
+            fig.add_trace(go.Scatter(
+                x=plot_prices_clean.index, 
+                y=plot_prices_clean.values, 
+                name='Price',
+                line=dict(color='#7c3aed', width=2)
+            ), row=1, col=1)
+            
+            fig.add_trace(go.Scatter(
+                x=plot_factors_clean.index, 
+                y=plot_factors_clean.values, 
+                name=sel,
+                line=dict(color='#06b6d4', width=2),
+                fill='tozeroy',
+                fillcolor='rgba(6, 182, 212, 0.1)'
+            ), row=2, col=1)
+            
+            fig.update_layout(**PLOT, height=700, showlegend=False)
+            fig.update_xaxes(title_text="Date", row=2, col=1)
+            fig.update_yaxes(title_text="Price ($)", row=1, col=1, tickformat='$,.2f')
+            fig.update_yaxes(title_text="Factor Value", row=2, col=1)
+            
             st.plotly_chart(fig, use_container_width=True)
         
         with col2:
-            st.markdown("### Stats")
+            st.markdown("### 📊 Statistics")
             cur = safe_float(factors[sel].iloc[-1])
             mean = safe_float(factors[sel].mean())
             std = safe_float(factors[sel].std())
             
-            st.metric("Current", f"{cur:.4f}")
+            st.metric("Current Value", f"{cur:.4f}")
             st.metric("Mean", f"{mean:.4f}")
-            st.metric("Std", f"{std:.4f}")
+            st.metric("Std Dev", f"{std:.4f}")
+            
+            if std > 0:
+                z = (cur - mean) / std
+                st.metric("Z-Score", f"{z:.2f}")
+                
+                if abs(z) > 2:
+                    st.warning("⚠️ **Extreme Value** (|Z| > 2)")
+                elif abs(z) > 1:
+                    st.info("ℹ️ **Notable Deviation**")
+                else:
+                    st.success("✅ **Normal Range**")
 
 with tab3:
-    st.markdown("## Backtesting")
+    st.markdown("## Strategy Backtesting")
     
     strat = st.selectbox("Strategy:", ["Mean Reversion", "Momentum", "RSI", "Multi-Factor"])
     
     if len(factors) == 0:
-        st.warning("Not enough data")
+        st.warning("Not enough data for backtesting")
     else:
         if strat == "Mean Reversion":
-            st.info("Buy below average, sell above")
+            st.info("**Buy** when price is far below average | **Sell** when far above")
             sigs = factors['mean_reversion'].apply(lambda x: -1 if x > mr_thresh else (1 if x < -mr_thresh else 0))
         elif strat == "Momentum":
-            st.info("Follow trends")
+            st.info("**Buy** uptrends | **Sell** downtrends")
             sigs = factors['momentum_20'].apply(lambda x: 1 if x > 0.02 else (-1 if x < -0.02 else 0))
         elif strat == "RSI":
-            st.info(f"Buy < {rsi_low}, sell > {rsi_high}")
+            st.info(f"**Buy** when RSI < {rsi_low} | **Sell** when RSI > {rsi_high}")
             sigs = factors['rsi_14'].apply(lambda x: 1 if x < rsi_low else (-1 if x > rsi_high else 0))
         else:
-            st.info("Combines momentum + RSI")
+            st.info("**Combined** momentum and RSI signals")
             sigs = ((factors['momentum_20'] > 0.02) & (factors['rsi_14'] < 50)).astype(int) - \
                    ((factors['momentum_20'] < -0.02) & (factors['rsi_14'] > 50)).astype(int)
         
         if st.button("🚀 Run Backtest", type="primary"):
-            with st.spinner("Running..."):
+            with st.spinner("Running backtest..."):
                 bt = Backtester(capital, comm/100)
                 idx = prices.index.intersection(sigs.index)
                 if len(idx) > 0:
                     res = bt.run(prices.loc[idx], sigs.loc[idx])
                     met = bt.metrics(res)
                     
-                    st.success("✅ Complete!")
+                    st.success("✅ Backtest Complete!")
                     
                     col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("Return", f"{met['total_return']:.2%}")
-                    col2.metric("Sharpe", f"{met['sharpe']:.2f}")
-                    col3.metric("Max DD", f"{met['max_drawdown']:.2%}")
-                    col4.metric("Final", f"${met['final']:,.0f}")
+                    col1.metric("Total Return", f"{met['total_return']:.2%}")
+                    col2.metric("Sharpe Ratio", f"{met['sharpe']:.2f}")
+                    col3.metric("Max Drawdown", f"{met['max_drawdown']:.2%}")
+                    col4.metric("Final Value", f"${met['final']:,.0f}")
+                    
+                    st.markdown("### 📈 Performance vs Buy & Hold")
+                    
+                    # Clean data for plotting
+                    res_clean = res.copy()
+                    if hasattr(res_clean['date'].iloc[0], 'tz'):
+                        res_clean['date'] = pd.to_datetime(res_clean['date']).dt.tz_localize(None)
                     
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=res['date'], y=res['value'], name='Strategy', 
-                                            line=dict(color='#10b981', width=3)))
+                    
+                    fig.add_trace(go.Scatter(
+                        x=res_clean['date'], 
+                        y=res_clean['value'], 
+                        name='Strategy', 
+                        line=dict(color='#10b981', width=3),
+                        fill='tozeroy',
+                        fillcolor='rgba(16, 185, 129, 0.1)'
+                    ))
+                    
                     bh = capital * (prices.loc[idx] / prices.loc[idx].iloc[0])
-                    fig.add_trace(go.Scatter(x=res['date'], y=bh.values, name='Buy&Hold', 
-                                            line=dict(color='#7c3aed', width=2, dash='dash')))
-                    fig.update_layout(**PLOT, height=500)
+                    fig.add_trace(go.Scatter(
+                        x=res_clean['date'], 
+                        y=bh.values, 
+                        name='Buy & Hold', 
+                        line=dict(color='#7c3aed', width=2, dash='dash')
+                    ))
+                    
+                    fig.update_layout(
+                        **PLOT, 
+                        height=500, 
+                        hovermode='x unified',
+                        xaxis_title="Date",
+                        yaxis_title="Portfolio Value ($)",
+                        showlegend=True,
+                        legend=dict(x=0.01, y=0.99, bgcolor='rgba(26,31,58,0.8)')
+                    )
+                    fig.update_yaxes(tickformat='$,.0f')
+                    
                     st.plotly_chart(fig, use_container_width=True)
+                    
+                    csv_res = res.to_csv(index=False).encode()
+                    st.download_button("📥 Download Results", csv_res, "backtest.csv")
 
 with tab4:
-    st.markdown("## Reports")
+    st.markdown("## Analysis Reports")
     
     if len(factors) > 0:
-        st.markdown("### Correlation Matrix")
+        st.markdown("### Factor Correlation Matrix")
         corr = factors.corr()
-        fig = go.Figure(data=go.Heatmap(z=corr.values, x=corr.columns, y=corr.columns,
-                                        colorscale=[[0,'#7c3aed'],[0.5,'#1a1f3a'],[1,'#06b6d4']],
-                                        text=np.round(corr.values, 2), texttemplate='%{text}'))
-        fig.update_layout(**PLOT, height=500)
+        
+        fig = go.Figure(data=go.Heatmap(
+            z=corr.values, 
+            x=corr.columns, 
+            y=corr.columns,
+            colorscale=[[0,'#7c3aed'],[0.5,'#1a1f3a'],[1,'#06b6d4']],
+            text=np.round(corr.values, 2), 
+            texttemplate='%{text}',
+            textfont={"size": 12, "color": '#f8fafc'},
+            hoverongaps=False
+        ))
+        
+        fig.update_layout(**PLOT, height=500, xaxis_showgrid=False, yaxis_showgrid=False)
         st.plotly_chart(fig, use_container_width=True)
     
-    st.markdown("### Export")
+    st.markdown("### 📥 Export Data")
     col1, col2 = st.columns(2)
+    
     with col1:
-        st.download_button("📥 Prices", prices.to_csv().encode(), "prices.csv")
+        st.download_button("📥 Price Data (CSV)", prices.to_csv().encode(), "prices.csv", use_container_width=True)
+    
     with col2:
         if len(factors) > 0:
-            st.download_button("📥 Factors", factors.to_csv().encode(), "factors.csv")
+            st.download_button("📥 Factor Data (CSV)", factors.to_csv().encode(), "factors.csv", use_container_width=True)
 
 st.markdown("---")
-st.markdown("<div style='text-align:center;color:#64748b;'>AMIE Platform v2.0</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center;color:#64748b;'>AMIE Platform v2.0 Enhanced | Professional-Grade Analytics</div>", unsafe_allow_html=True)
