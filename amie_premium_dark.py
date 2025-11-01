@@ -1,5 +1,6 @@
 """
-AMIE Platform v2.0 - PREMIUM DARK EDITION (Deployment Fixed)
+AMIE Platform v2.0 - ENHANCED & ROBUST VERSION
+Fully interactive with real data and actionable insights
 """
 
 import streamlit as st
@@ -8,33 +9,20 @@ import pandas as pd
 from scipy.stats import pearsonr
 import matplotlib.pyplot as plt
 import seaborn as sns
-from datetime import datetime
+from datetime import datetime, timedelta
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# Optional ML packages
+# Try to import yfinance for real data
 try:
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
-    import torch
-    FINBERT_AVAILABLE = True
+    import yfinance as yf
+    REAL_DATA_AVAILABLE = True
 except ImportError:
-    FINBERT_AVAILABLE = False
+    REAL_DATA_AVAILABLE = False
 
-try:
-    from stable_baselines3 import PPO
-    import gym
-    RL_AVAILABLE = True
-except ImportError:
-    RL_AVAILABLE = False
+st.set_page_config(page_title="AMIE Platform", page_icon="🌙", layout="wide")
 
-st.set_page_config(
-    page_title="AMIE Platform",
-    page_icon="🌙",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# CSS
+# Premium CSS
 st.markdown("""
 <style>
     .stApp { background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 50%, #0f1419 100%); }
@@ -44,25 +32,19 @@ st.markdown("""
     [data-testid="stMetricValue"] { font-size: 2rem !important; font-weight: 700 !important;
                                      background: linear-gradient(135deg, #7c3aed 0%, #3b82f6 100%);
                                      -webkit-background-clip: text !important; -webkit-text-fill-color: transparent !important; }
-    .stTabs [aria-selected="true"] { background: linear-gradient(135deg, #7c3aed 0%, #3b82f6 100%) !important;
-                                      color: white !important; }
-    .stButton > button { background: linear-gradient(135deg, #7c3aed 0%, #3b82f6 100%);
-                         color: white; border-radius: 12px; padding: 0.75rem 2rem; font-weight: 600; }
+    .stTabs [aria-selected="true"] { background: linear-gradient(135deg, #7c3aed 0%, #3b82f6 100%) !important; color: white !important; }
+    .stButton > button { background: linear-gradient(135deg, #7c3aed 0%, #3b82f6 100%); color: white; border-radius: 12px; padding: 0.75rem 2rem; font-weight: 600; }
+    .insight-box { background: rgba(124, 58, 237, 0.1); border-left: 4px solid #7c3aed; padding: 1rem; border-radius: 8px; margin: 1rem 0; }
+    .recommendation { background: rgba(16, 185, 129, 0.1); border-left: 4px solid #10b981; padding: 1rem; border-radius: 8px; margin: 1rem 0; }
 </style>
 """, unsafe_allow_html=True)
 
-# Plotly config - FIXED
-PLOT_CONFIG = {
-    'font': {'color': '#f8fafc'},
-    'paper_bgcolor': 'rgba(26, 31, 58, 0.6)',
-    'plot_bgcolor': 'rgba(10, 14, 39, 0.4)',
-    'xaxis': {'gridcolor': 'rgba(124, 58, 237, 0.1)'},
-    'yaxis': {'gridcolor': 'rgba(124, 58, 237, 0.1)'}}
-
-plt.style.use('dark_background')
+PLOT_CONFIG = {'font': {'color': '#f8fafc'}, 'paper_bgcolor': 'rgba(26, 31, 58, 0.6)', 
+               'plot_bgcolor': 'rgba(10, 14, 39, 0.4)', 'xaxis': {'gridcolor': 'rgba(124, 58, 237, 0.1)'}, 
+               'yaxis': {'gridcolor': 'rgba(124, 58, 237, 0.1)'}}
 
 # Alpha Factors
-class AlphaFactorLibrary:
+class AlphaFactors:
     @staticmethod
     def momentum(prices, window=20):
         return prices.pct_change(window)
@@ -89,172 +71,538 @@ class AlphaFactorLibrary:
         return (prices - lower) / (upper - lower + 1e-10)
     
     @staticmethod
-    def compute_all_factors(prices):
+    def compute_all(prices):
         f = pd.DataFrame(index=prices.index)
-        f['momentum_10'] = AlphaFactorLibrary.momentum(prices, 10)
-        f['momentum_20'] = AlphaFactorLibrary.momentum(prices, 20)
-        f['momentum_60'] = AlphaFactorLibrary.momentum(prices, 60)
-        f['mean_reversion'] = AlphaFactorLibrary.mean_reversion(prices, 20)
-        f['rsi_14'] = AlphaFactorLibrary.rsi(prices, 14)
-        f['bollinger'] = AlphaFactorLibrary.bollinger_position(prices, 20)
+        f['momentum_10'] = AlphaFactors.momentum(prices, 10)
+        f['momentum_20'] = AlphaFactors.momentum(prices, 20)
+        f['mean_reversion'] = AlphaFactors.mean_reversion(prices, 20)
+        f['rsi_14'] = AlphaFactors.rsi(prices, 14)
+        f['bollinger'] = AlphaFactors.bollinger_position(prices, 20)
         return f.dropna()
 
 # Backtester
-class SimpleBacktester:
+class Backtester:
     def __init__(self, initial_capital=100000, commission=0.001):
         self.initial_capital = initial_capital
         self.commission = commission
-        self.reset()
     
-    def reset(self):
-        self.cash = self.initial_capital
-        self.positions = {}
-        self.trades = []
-        self.equity_curve = []
-    
-    def execute_trade(self, symbol, signal, price, date):
-        if signal == 1 and self.cash > 0:
-            shares = int(self.cash * 0.95 / price)
-            cost = shares * price * (1 + self.commission)
-            if cost <= self.cash:
-                self.cash -= cost
-                self.positions[symbol] = self.positions.get(symbol, 0) + shares
-        elif signal == -1 and self.positions.get(symbol, 0) > 0:
-            shares = self.positions[symbol]
-            self.cash += shares * price * (1 - self.commission)
-            self.positions[symbol] = 0
-    
-    def run_backtest(self, prices, signals):
-        self.reset()
+    def run(self, prices, signals):
+        cash = self.initial_capital
+        shares = 0
+        equity = []
+        
         for date in prices.index:
             price = prices[date]
             signal = signals[date] if date in signals.index else 0
-            self.execute_trade('ASSET', signal, price, date)
-            pval = self.cash + sum(s * prices.get(sym, 0) for sym, s in self.positions.items())
-            self.equity_curve.append({'date': date, 'portfolio_value': pval, 
-                                     'returns': (pval - self.initial_capital) / self.initial_capital})
-        return pd.DataFrame(self.equity_curve)
+            
+            if signal == 1 and cash > 0:
+                shares = int(cash * 0.95 / price)
+                cash -= shares * price * (1 + self.commission)
+            elif signal == -1 and shares > 0:
+                cash += shares * price * (1 - self.commission)
+                shares = 0
+            
+            portfolio_val = cash + shares * price
+            equity.append({'date': date, 'value': portfolio_val, 'returns': (portfolio_val - self.initial_capital) / self.initial_capital})
+        
+        return pd.DataFrame(equity)
     
-    def get_performance_metrics(self):
-        if not self.equity_curve:
-            return {}
-        df = pd.DataFrame(self.equity_curve)
-        df['daily_returns'] = df['portfolio_value'].pct_change()
-        total_ret = (df['portfolio_value'].iloc[-1] - self.initial_capital) / self.initial_capital
-        sharpe = (df['daily_returns'].mean() / df['daily_returns'].std()) * np.sqrt(252) if df['daily_returns'].std() > 0 else 0
-        cummax = df['portfolio_value'].cummax()
-        max_dd = ((df['portfolio_value'] - cummax) / cummax).min()
-        return {'Total Return': f"{total_ret:.2%}", 'Sharpe Ratio': f"{sharpe:.2f}", 
-                'Max Drawdown': f"{max_dd:.2%}", 'Trades': len(self.trades)}
+    def metrics(self, equity_df):
+        equity_df['daily_ret'] = equity_df['value'].pct_change()
+        total_ret = (equity_df['value'].iloc[-1] - self.initial_capital) / self.initial_capital
+        sharpe = (equity_df['daily_ret'].mean() / equity_df['daily_ret'].std()) * np.sqrt(252) if equity_df['daily_ret'].std() > 0 else 0
+        max_dd = ((equity_df['value'] - equity_df['value'].cummax()) / equity_df['value'].cummax()).min()
+        return {'total_return': total_ret, 'sharpe': sharpe, 'max_drawdown': max_dd, 
+                'final_value': equity_df['value'].iloc[-1], 'num_days': len(equity_df)}
 
 # Header
-st.markdown('<h1 class="main-header">🌙 AMIE PLATFORM</h1>', unsafe_allow_html=True)
-if not FINBERT_AVAILABLE or not RL_AVAILABLE:
-    st.info("💡 Lightweight Mode: Core features active")
+st.markdown('<h1 class="main-header">🌙 AMIE PLATFORM - ENHANCED</h1>', unsafe_allow_html=True)
+st.markdown("### Adaptive Market Intelligence Engine - **Now with Real Data & Actionable Insights**")
 
-# Sidebar
+# Sidebar - ENHANCED with real controls
 with st.sidebar:
-    st.markdown("### ⚙️ Configuration")
-    n_samples = st.slider("Data Samples", 100, 2000, 500)
-    initial_capital = st.number_input("Initial Capital", 10000, 1000000, 100000, 10000)
+    st.markdown("## ⚙️ Data Source")
+    
+    data_source = st.radio("Choose data:", ["📊 Real Market Data (yfinance)", "🎲 Simulated Data"])
+    
+    if data_source == "📊 Real Market Data (yfinance)":
+        if REAL_DATA_AVAILABLE:
+            ticker = st.text_input("Enter Ticker Symbol:", value="SPY", help="e.g., SPY, AAPL, TSLA, BTC-USD")
+            period = st.selectbox("Time Period:", ["1mo", "3mo", "6mo", "1y", "2y", "5y"], index=3)
+            use_real_data = True
+        else:
+            st.error("⚠️ yfinance not installed. Add to requirements.txt")
+            use_real_data = False
+            n_samples = 500
+    else:
+        use_real_data = False
+        n_samples = st.slider("Simulated Days:", 100, 2000, 500)
     
     st.markdown("---")
-    st.markdown("### Features")
-    for name, avail in [("✓ Alpha Factors", True), ("✓ Backtesting", True), 
-                        ("⚠️ FinBERT", FINBERT_AVAILABLE), ("⚠️ RL", RL_AVAILABLE)]:
-        color = "#10b981" if avail else "#f59e0b"
-        st.markdown(f"<div style='color:{color};'>{name}</div>", unsafe_allow_html=True)
+    st.markdown("## 💰 Trading Parameters")
+    initial_capital = st.number_input("Initial Capital ($):", 10000, 1000000, 100000, 10000)
+    commission_pct = st.slider("Commission (%):", 0.0, 1.0, 0.1, 0.05)
+    
+    st.markdown("---")
+    st.markdown("## 🎯 Strategy Settings")
+    rsi_oversold = st.slider("RSI Oversold Threshold:", 20, 40, 30)
+    rsi_overbought = st.slider("RSI Overbought Threshold:", 60, 80, 70)
+    mean_rev_threshold = st.slider("Mean Reversion Threshold:", 0.01, 0.10, 0.05, 0.01)
 
-# Generate data
-np.random.seed(42)
-dates = pd.date_range(end=datetime.now(), periods=n_samples, freq='D')
-equities = pd.Series(np.cumsum(np.random.randn(n_samples)) + 100, index=dates)
-derivatives = equities * (1.2 + np.random.randn(n_samples) * 0.02)
-market_df = pd.DataFrame({'Equities': equities, 'Derivatives': derivatives})
+# Load data
+@st.cache_data(ttl=3600)
+def load_data(ticker, period):
+    try:
+        data = yf.download(ticker, period=period, progress=False)
+        return data['Close']
+    except:
+        return None
+
+if use_real_data and REAL_DATA_AVAILABLE:
+    with st.spinner(f"Loading {ticker} data..."):
+        prices = load_data(ticker, period)
+        if prices is not None and len(prices) > 0:
+            st.success(f"✅ Loaded {len(prices)} days of {ticker} data")
+            data_type = f"Real: {ticker}"
+        else:
+            st.error("Failed to load data. Using simulated data.")
+            use_real_data = False
+else:
+    np.random.seed(42)
+    dates = pd.date_range(end=datetime.now(), periods=n_samples, freq='D')
+    prices = pd.Series(np.cumsum(np.random.randn(n_samples) * 2) + 100, index=dates)
+    data_type = "Simulated"
+
+# Compute factors
+factors = AlphaFactors.compute_all(prices)
 
 # Tabs
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Dashboard", "📈 Alpha Factors", "💹 Backtesting", "🤖 ML", "🎯 Analytics"])
+tab1, tab2, tab3, tab4 = st.tabs(["📊 Market Overview", "📈 Factor Analysis", "💹 Strategy Backtesting", "📋 Reports"])
 
+# TAB 1: Market Overview with REAL insights
 with tab1:
-    st.markdown("## Dashboard")
+    st.markdown("## 📊 Market Overview & Analysis")
+    
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Price", f"${equities.iloc[-1]:.2f}")
-    col2.metric("Correlation", f"{market_df.corr().iloc[0,1]:.3f}")
-    col3.metric("Volatility", f"{equities.pct_change().std()*np.sqrt(252):.2%}")
-    col4.metric("Risk", "0.67")
     
-    fig = go.Figure()
-    for col in market_df.columns:
-        fig.add_trace(go.Scatter(x=market_df.index, y=market_df[col], name=col))
-    fig.update_layout(**PLOT_CONFIG, height=400)
-    st.plotly_chart(fig, use_container_width=True)
+    current_price = prices.iloc[-1]
+    price_change = prices.pct_change().iloc[-1]
+    volatility = prices.pct_change().std() * np.sqrt(252)
+    current_rsi = factors['rsi_14'].iloc[-1]
     
-    st.markdown("### Sentiment")
-    sample = st.text_area("Headlines:", "Tech rally.\\nFed holds.")
-    if st.button("🚀 Analyze"):
-        if not FINBERT_AVAILABLE:
-            st.warning("⚠️ FinBERT requires PyTorch")
-            st.dataframe(pd.DataFrame({'headline': ['Demo'], 'positive': [0.6], 'neutral': [0.3], 'negative': [0.1]}))
-        else:
-            st.success("Analysis complete!")
-
-with tab2:
-    st.markdown("## Alpha Factors")
-    with st.spinner("Computing..."):
-        factors = AlphaFactorLibrary.compute_all_factors(equities)
-    st.success("✓ Done!")
+    col1.metric("Current Price", f"${current_price:.2f}", f"{price_change:.2%}")
+    col2.metric("30-Day Return", f"{prices.pct_change(30).iloc[-1]:.2%}")
+    col3.metric("Volatility (Annual)", f"{volatility:.1%}")
+    col4.metric("RSI (14)", f"{current_rsi:.1f}")
     
-    sel = st.selectbox("Factor:", factors.columns.tolist())
-    fig = make_subplots(rows=2, cols=1, subplot_titles=('Price', sel))
-    fig.add_trace(go.Scatter(x=equities.index, y=equities, name='Price'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=factors.index, y=factors[sel], name=sel), row=2, col=1)
-    fig.update_layout(**PLOT_CONFIG, height=600)
-    st.plotly_chart(fig, use_container_width=True)
+    # ACTIONABLE INSIGHTS
+    st.markdown("### 🎯 Current Market Signal")
     
-    st.metric("Mean", f"{factors[sel].mean():.4f}")
-    st.metric("Std", f"{factors[sel].std():.4f}")
-
-with tab3:
-    st.markdown("## Backtesting")
-    strat = st.selectbox("Strategy:", ["Mean Reversion", "Momentum", "RSI"])
-    
-    if strat == "Mean Reversion":
-        signals = factors['mean_reversion'].apply(lambda x: -1 if x > 0.05 else (1 if x < -0.05 else 0))
-    elif strat == "Momentum":
-        signals = factors['momentum_20'].apply(lambda x: 1 if x > 0 else -1)
+    if current_rsi > 70:
+        st.markdown(f"""
+        <div class="insight-box">
+        <strong>⚠️ OVERBOUGHT SIGNAL</strong><br>
+        RSI at {current_rsi:.1f} (above 70) suggests the asset may be overvalued.<br>
+        <strong>Consideration:</strong> Potential sell opportunity or wait for pullback.
+        </div>
+        """, unsafe_allow_html=True)
+    elif current_rsi < 30:
+        st.markdown(f"""
+        <div class="recommendation">
+        <strong>✅ OVERSOLD SIGNAL</strong><br>
+        RSI at {current_rsi:.1f} (below 30) suggests the asset may be undervalued.<br>
+        <strong>Consideration:</strong> Potential buy opportunity.
+        </div>
+        """, unsafe_allow_html=True)
     else:
-        signals = factors['rsi_14'].apply(lambda x: -1 if x > 70 else (1 if x < 30 else 0))
+        st.info(f"ℹ️ **NEUTRAL**: RSI at {current_rsi:.1f} is in normal range (30-70). No strong signal.")
     
-    if st.button("🚀 Run"):
-        with st.spinner("Running..."):
-            bt = SimpleBacktester(initial_capital)
-            idx = equities.index.intersection(signals.index)
-            results = bt.run_backtest(equities.loc[idx], signals.loc[idx])
-            metrics = bt.get_performance_metrics()
-        
-        st.success("✅ Complete!")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Return", metrics.get('Total Return', 'N/A'))
-        col2.metric("Sharpe", metrics.get('Sharpe Ratio', 'N/A'))
-        col3.metric("Max DD", metrics.get('Max Drawdown', 'N/A'))
-        
+    st.markdown("---")
+    
+    # Interactive price chart
+    st.markdown("### 📈 Price History")
+    
+    chart_type = st.radio("Chart Type:", ["Line", "Candlestick (with Moving Averages)"], horizontal=True)
+    
+    if chart_type == "Line":
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=results['date'], y=results['portfolio_value'], name='Portfolio'))
-        fig.update_layout(**PLOT_CONFIG, height=400)
-        st.plotly_chart(fig, use_container_width=True)
-
-with tab4:
-    st.markdown("## ML Models")
-    if not RL_AVAILABLE:
-        st.warning("⚠️ RL requires stable-baselines3")
-        st.info("✅ Core features work!")
+        fig.add_trace(go.Scatter(x=prices.index, y=prices, name='Price', line=dict(color='#7c3aed', width=2)))
+        fig.add_trace(go.Scatter(x=prices.index, y=prices.rolling(20).mean(), name='20-day MA', 
+                                line=dict(color='#06b6d4', width=1, dash='dash')))
+        fig.add_trace(go.Scatter(x=prices.index, y=prices.rolling(50).mean(), name='50-day MA', 
+                                line=dict(color='#ec4899', width=1, dash='dash')))
     else:
-        if st.button("🚀 Train"):
-            st.success("Training demo complete!")
+        # Candlestick chart (simplified with OHLC simulation)
+        df = pd.DataFrame(index=prices.index)
+        df['close'] = prices
+        df['open'] = prices.shift(1)
+        df['high'] = prices.rolling(2).max()
+        df['low'] = prices.rolling(2).min()
+        
+        fig = go.Figure(data=[go.Candlestick(x=df.index, open=df['open'], high=df['high'], 
+                                             low=df['low'], close=df['close'], name='OHLC')])
+        fig.add_trace(go.Scatter(x=prices.index, y=prices.rolling(20).mean(), name='20-day MA', 
+                                line=dict(color='#06b6d4', width=2)))
+    
+    fig.update_layout(**PLOT_CONFIG, height=500, hovermode='x unified')
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Download data
+    col1, col2 = st.columns(2)
+    with col1:
+        csv = prices.to_csv().encode('utf-8')
+        st.download_button("📥 Download Price Data (CSV)", csv, "prices.csv", "text/csv")
+    with col2:
+        factor_csv = factors.to_csv().encode('utf-8')
+        st.download_button("📥 Download Factors (CSV)", factor_csv, "factors.csv", "text/csv")
 
-with tab5:
-    st.markdown("## Analytics")
-    st.info("🔜 Advanced analytics in Phase 2")
+# TAB 2: Factor Analysis with EXPLANATIONS
+with tab2:
+    st.markdown("## 📈 Alpha Factor Analysis")
+    
+    st.markdown("""
+    **What are Alpha Factors?** They're quantitative signals that may predict future price movements.
+    High-quality factors have strong predictive power (high IC).
+    """)
+    
+    selected = st.selectbox("Select Factor to Analyze:", factors.columns.tolist())
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        fig = make_subplots(rows=2, cols=1, subplot_titles=(f'{data_type} Price', f'Factor: {selected}'), 
+                           vertical_spacing=0.15, row_heights=[0.5, 0.5])
+        
+        fig.add_trace(go.Scatter(x=prices.index, y=prices, name='Price', line=dict(color='#7c3aed', width=2)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=factors.index, y=factors[selected], name=selected, 
+                                line=dict(color='#06b6d4', width=2), fill='tozeroy'), row=2, col=1)
+        
+        fig.update_layout(**PLOT_CONFIG, height=600, showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        st.markdown("### 📊 Factor Statistics")
+        
+        current_val = factors[selected].iloc[-1]
+        mean_val = factors[selected].mean()
+        std_val = factors[selected].std()
+        
+        st.metric("Current Value", f"{current_val:.4f}")
+        st.metric("Mean", f"{mean_val:.4f}")
+        st.metric("Std Dev", f"{std_val:.4f}")
+        st.metric("Z-Score", f"{(current_val - mean_val) / std_val:.2f}")
+        
+        # Predictive power
+        forward_ret = prices.pct_change(5).shift(-5)
+        valid_idx = factors.index.intersection(forward_ret.index)
+        
+        if len(valid_idx) > 20:
+            fv = factors.loc[valid_idx, selected]
+            fr = forward_ret.loc[valid_idx]
+            mask = ~(fv.isna() | fr.isna())
+            
+            if mask.sum() > 20:
+                ic, pval = pearsonr(fv[mask], fr[mask])
+                st.metric("IC (5-day)", f"{ic:.4f}")
+                
+                if abs(ic) > 0.1:
+                    st.success("✅ Strong Predictor!")
+                elif abs(ic) > 0.05:
+                    st.info("ℹ️ Moderate Predictor")
+                else:
+                    st.warning("⚠️ Weak Signal")
+        
+        # Interpretation
+        st.markdown("### 💡 What This Means")
+        
+        if selected.startswith('momentum'):
+            if current_val > 0.05:
+                st.success("📈 **Strong Upward Momentum** - Trend is bullish")
+            elif current_val < -0.05:
+                st.error("📉 **Strong Downward Momentum** - Trend is bearish")
+            else:
+                st.info("➡️ **Neutral Momentum** - No clear trend")
+        
+        elif selected == 'rsi_14':
+            if current_val > 70:
+                st.warning("⚠️ **Overbought** - Possible reversal coming")
+            elif current_val < 30:
+                st.success("✅ **Oversold** - Possible bounce coming")
+            else:
+                st.info("ℹ️ **Normal Range** - No extreme condition")
+        
+        elif selected == 'mean_reversion':
+            if abs(current_val) > 0.05:
+                st.warning("⚠️ **Far from Mean** - Likely to revert")
+            else:
+                st.info("ℹ️ **Near Mean** - Stable price")
 
+# Continued in next message due to length...
+# TAB 3: Interactive Strategy Backtesting
+with tab3:
+    st.markdown("## 💹 Interactive Strategy Backtesting")
+    
+    st.markdown("""
+    **Test trading strategies** on historical data to see if they would have been profitable.
+    Adjust parameters in the sidebar to see how they affect performance.
+    """)
+    
+    # Strategy selection with descriptions
+    strategy = st.selectbox("Select Trading Strategy:", 
+                           ["Mean Reversion", "Momentum Trend Following", "RSI Oscillator", "Custom Multi-Factor"])
+    
+    if strategy == "Mean Reversion":
+        st.info("**Strategy:** Buy when price is far below average, sell when far above. Works best in ranging markets.")
+        signals = factors['mean_reversion'].apply(lambda x: -1 if x > mean_rev_threshold else (1 if x < -mean_rev_threshold else 0))
+    
+    elif strategy == "Momentum Trend Following":
+        st.info("**Strategy:** Buy uptrends, sell downtrends. Works best in trending markets.")
+        signals = factors['momentum_20'].apply(lambda x: 1 if x > 0.02 else (-1 if x < -0.02 else 0))
+    
+    elif strategy == "RSI Oscillator":
+        st.info(f"**Strategy:** Buy when RSI < {rsi_oversold} (oversold), sell when RSI > {rsi_overbought} (overbought).")
+        signals = factors['rsi_14'].apply(lambda x: 1 if x < rsi_oversold else (-1 if x > rsi_overbought else 0))
+    
+    else:
+        st.info("**Strategy:** Combines momentum + RSI for stronger signals.")
+        mom_signal = factors['momentum_20'] > 0.02
+        rsi_buy = factors['rsi_14'] < 50
+        rsi_sell = factors['rsi_14'] > 50
+        signals = ((mom_signal & rsi_buy).astype(int) - ((~mom_signal) & rsi_sell).astype(int))
+    
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.markdown("### 📊 Signal Distribution")
+        signal_counts = signals.value_counts()
+        fig_signals = go.Figure(data=[go.Bar(
+            x=['Sell', 'Hold', 'Buy'],
+            y=[signal_counts.get(-1, 0), signal_counts.get(0, 0), signal_counts.get(1, 0)],
+            marker_color=['#ef4444', '#64748b', '#10b981']
+        )])
+        fig_signals.update_layout(**PLOT_CONFIG, height=300, showlegend=False)
+        st.plotly_chart(fig_signals, use_container_width=True)
+    
+    with col2:
+        st.markdown("### ⚙️ Backtest Settings")
+        st.write(f"**Initial Capital:** ${initial_capital:,}")
+        st.write(f"**Commission:** {commission_pct}%")
+        st.write(f"**Test Period:** {len(prices)} days")
+        st.write(f"**Strategy:** {strategy}")
+    
+    if st.button("🚀 Run Backtest", type="primary", use_container_width=True):
+        with st.spinner("Running backtest..."):
+            bt = Backtester(initial_capital, commission_pct/100)
+            common_idx = prices.index.intersection(signals.index)
+            results = bt.run(prices.loc[common_idx], signals.loc[common_idx])
+            metrics = bt.metrics(results)
+        
+        st.success("✅ Backtest Complete!")
+        
+        # Performance metrics in a nice grid
+        st.markdown("### 📊 Performance Summary")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        total_ret = metrics['total_return']
+        col1.metric("Total Return", f"{total_ret:.2%}", 
+                   f"{(total_ret - (prices.iloc[-1]/prices.iloc[0] - 1)):.2%} vs Buy&Hold")
+        
+        sharpe = metrics['sharpe']
+        col2.metric("Sharpe Ratio", f"{sharpe:.2f}", 
+                   "Excellent" if sharpe > 2 else ("Good" if sharpe > 1 else "Poor"))
+        
+        max_dd = metrics['max_drawdown']
+        col3.metric("Max Drawdown", f"{max_dd:.2%}", 
+                   "Low Risk" if max_dd > -0.1 else ("Moderate" if max_dd > -0.2 else "High Risk"))
+        
+        col4.metric("Final Value", f"${metrics['final_value']:,.0f}", 
+                   f"${metrics['final_value'] - initial_capital:,.0f}")
+        
+        # Performance interpretation
+        st.markdown("### 💡 Strategy Performance Analysis")
+        
+        if total_ret > 0.15 and sharpe > 1.5:
+            st.markdown("""
+            <div class="recommendation">
+            <strong>✅ STRONG PERFORMANCE</strong><br>
+            This strategy showed excellent risk-adjusted returns. High Sharpe ratio indicates consistent profits relative to volatility.
+            <strong>Consider:</strong> This strategy may work well in similar market conditions.
+            </div>
+            """, unsafe_allow_html=True)
+        elif total_ret > 0 and sharpe > 0.5:
+            st.markdown("""
+            <div class="insight-box">
+            <strong>ℹ️ MODERATE PERFORMANCE</strong><br>
+            Strategy was profitable but returns were modest relative to risk taken.
+            <strong>Consider:</strong> Test with different parameters or combine with other signals.
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div class="insight-box">
+            <strong>⚠️ POOR PERFORMANCE</strong><br>
+            Strategy underperformed or had negative returns. High volatility relative to returns.
+            <strong>Consider:</strong> This strategy may not work in current market conditions. Try different approach.
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        # Equity curve visualization
+        st.markdown("### 📈 Portfolio Value Over Time")
+        
+        fig = make_subplots(rows=2, cols=1, subplot_titles=('Portfolio Equity Curve', 'Drawdown'), 
+                           vertical_spacing=0.12, row_heights=[0.65, 0.35])
+        
+        # Equity curve
+        fig.add_trace(go.Scatter(x=results['date'], y=results['value'], name='Portfolio Value', 
+                                line=dict(color='#10b981', width=3), fill='tozeroy', 
+                                fillcolor='rgba(16, 185, 129, 0.1)'), row=1, col=1)
+        
+        # Buy & Hold comparison
+        buy_hold = initial_capital * (prices.loc[common_idx] / prices.loc[common_idx].iloc[0])
+        fig.add_trace(go.Scatter(x=results['date'], y=buy_hold, name='Buy & Hold', 
+                                line=dict(color='#7c3aed', width=2, dash='dash')), row=1, col=1)
+        
+        # Drawdown
+        cummax = results['value'].cummax()
+        drawdown = ((results['value'] - cummax) / cummax) * 100
+        fig.add_trace(go.Scatter(x=results['date'], y=drawdown, name='Drawdown %', 
+                                fill='tozeroy', fillcolor='rgba(239, 68, 68, 0.3)', 
+                                line=dict(color='#ef4444', width=2)), row=2, col=1)
+        
+        fig.update_layout(**PLOT_CONFIG, height=700, hovermode='x unified')
+        fig.update_yaxes(title_text="Portfolio Value ($)", row=1, col=1)
+        fig.update_yaxes(title_text="Drawdown (%)", row=2, col=1)
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Download results
+        st.markdown("### 📥 Export Results")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            results_csv = results.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Download Backtest Results (CSV)", results_csv, 
+                             f"backtest_{strategy.replace(' ', '_')}.csv", "text/csv")
+        
+        with col2:
+            # Create summary report
+            report = f"""AMIE Platform - Backtest Report
+================================
+Data: {data_type}
+Strategy: {strategy}
+Period: {results['date'].iloc[0].date()} to {results['date'].iloc[-1].date()}
+
+Performance Metrics:
+--------------------
+Initial Capital: ${initial_capital:,}
+Final Value: ${metrics['final_value']:,.2f}
+Total Return: {metrics['total_return']:.2%}
+Sharpe Ratio: {metrics['sharpe']:.2f}
+Max Drawdown: {metrics['max_drawdown']:.2%}
+
+Buy & Hold Return: {(prices.iloc[-1]/prices.iloc[0] - 1):.2%}
+Outperformance: {(total_ret - (prices.iloc[-1]/prices.iloc[0] - 1)):.2%}
+
+Strategy Parameters:
+--------------------
+Commission: {commission_pct}%
+RSI Oversold: {rsi_oversold}
+RSI Overbought: {rsi_overbought}
+Mean Reversion Threshold: {mean_rev_threshold:.3f}
+"""
+            st.download_button("📥 Download Summary Report (TXT)", report.encode('utf-8'), 
+                             f"report_{strategy.replace(' ', '_')}.txt", "text/plain")
+
+# TAB 4: Comprehensive Reports
+with tab4:
+    st.markdown("## 📋 Comprehensive Analysis Reports")
+    
+    st.markdown("### 📊 Factor Correlation Matrix")
+    
+    corr_matrix = factors.corr()
+    
+    fig_corr = go.Figure(data=go.Heatmap(
+        z=corr_matrix.values,
+        x=corr_matrix.columns,
+        y=corr_matrix.columns,
+        colorscale=[[0, '#7c3aed'], [0.5, '#1a1f3a'], [1, '#06b6d4']],
+        text=np.round(corr_matrix.values, 2),
+        texttemplate='%{text}',
+        textfont={"size": 10, "color": '#f8fafc'}
+    ))
+    
+    fig_corr.update_layout(**PLOT_CONFIG, height=500)
+    st.plotly_chart(fig_corr, use_container_width=True)
+    
+    st.markdown("### 📈 Factor Performance Summary")
+    
+    # Calculate IC for all factors
+    forward_ret = prices.pct_change(5).shift(-5)
+    valid_idx = factors.index.intersection(forward_ret.index)
+    
+    ic_results = []
+    for col in factors.columns:
+        fv = factors.loc[valid_idx, col]
+        fr = forward_ret.loc[valid_idx]
+        mask = ~(fv.isna() | fr.isna())
+        
+        if mask.sum() > 20:
+            ic, pval = pearsonr(fv[mask], fr[mask])
+            ic_results.append({
+                'Factor': col,
+                'IC (5-day)': ic,
+                'Abs IC': abs(ic),
+                'Signal': '✅ Strong' if abs(ic) > 0.1 else ('ℹ️ Moderate' if abs(ic) > 0.05 else '⚠️ Weak')
+            })
+    
+    if ic_results:
+        ic_df = pd.DataFrame(ic_results).sort_values('Abs IC', ascending=False)
+        st.dataframe(ic_df[['Factor', 'IC (5-day)', 'Signal']], use_container_width=True, hide_index=True)
+    
+    st.markdown("### 🎯 Key Takeaways")
+    
+    st.markdown("""
+    **How to Use This Platform:**
+    
+    1. **Market Overview Tab:** Check current price, RSI, and momentum to gauge market conditions
+    2. **Factor Analysis Tab:** Identify which factors are currently signaling buy/sell opportunities
+    3. **Backtesting Tab:** Test different strategies and parameters to find what works
+    4. **This Tab:** Review overall factor performance and correlations
+    
+    **Next Steps:**
+    - Adjust strategy parameters in sidebar and re-run backtests
+    - Try different tickers if using real data
+    - Export results for further analysis in Excel/Python
+    - Combine insights from multiple factors for stronger signals
+    """)
+    
+    # Data export section
+    st.markdown("### 📥 Export All Data")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        price_csv = prices.to_csv().encode('utf-8')
+        st.download_button("📥 Prices", price_csv, "prices.csv", "text/csv", use_container_width=True)
+    
+    with col2:
+        factor_csv = factors.to_csv().encode('utf-8')
+        st.download_button("📥 Factors", factor_csv, "factors.csv", "text/csv", use_container_width=True)
+    
+    with col3:
+        if ic_results:
+            ic_csv = ic_df.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 IC Analysis", ic_csv, "ic_analysis.csv", "text/csv", use_container_width=True)
+
+# Footer with helpful tips
 st.markdown("---")
-st.markdown("<div style='text-align:center;color:#64748b;'>AMIE v2.0 Premium Dark</div>", unsafe_allow_html=True)
+st.markdown("""
+<div style='text-align: center; padding: 2rem; color: #64748b;'>
+    <strong>AMIE Platform v2.0 Enhanced</strong> | Institutional-Grade Quantitative Research<br>
+    💡 <strong>Tip:</strong> Try different combinations of parameters to find optimal strategies for your trading style
+</div>
+""", unsafe_allow_html=True)
